@@ -46,7 +46,7 @@ impl<K: Ord> LadderWrapper<BTreeMap<K, PriceLevel>> {
         self.first_key_value()
             .map(|(_, level)| level)?
             .front()
-            .and_then(|order_id| orders.get(order_id))
+            .and_then(|order| orders.get(& order.id()))
     }
 }
 
@@ -61,7 +61,7 @@ impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
             .or_insert_with(|| PriceLevel::new(limit_price));
 
         price_level.quantity += order.remaining();
-        price_level.push_back(order.id());
+        price_level.push_back(*order);
 
         Ok(self)
     }
@@ -79,7 +79,7 @@ impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
         } else {
             let price_level = price_level.get_mut();
             price_level.quantity -= order.remaining();
-            if let Some(idx) = price_level.iter().position(|&order_id| order.id() == order_id) {
+            if let Some(idx) = price_level.iter().position(|&order_id| order.id() == order_id.id()) {
                 price_level.remove(idx);
             }
         }
@@ -99,7 +99,7 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
             .or_insert_with(|| PriceLevel::new(limit_price));
 
         price_level.quantity += order.remaining();
-        price_level.push_back(order.id());
+        price_level.push_back(*order);
 
         Ok(self)
     }
@@ -117,7 +117,7 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
         } else {
             let price_level = price_level.get_mut();
             price_level.quantity -= order.remaining();
-            if let Some(idx) = price_level.iter().position(|&order_id| order.id() == order_id) {
+            if let Some(idx) = price_level.iter().position(|&order_id| order.id() == order_id.id()) {
                 price_level.remove(idx);
             }
         }
@@ -131,7 +131,7 @@ type BidsLadder = LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>>;
 
 #[derive(Debug)]
 pub struct PriceLevel {
-    order_ids: VecDeque<OrderId>,
+    orders: VecDeque<Order>,
     quantity: OrderQuantity,
     price: OrderPrice,
 }
@@ -139,7 +139,7 @@ pub struct PriceLevel {
 impl PriceLevel {
     fn new(price: OrderPrice) -> Self {
         Self {
-            order_ids: VecDeque::with_capacity(DEFAULT_LEVEL_SIZE),
+            orders: VecDeque::with_capacity(DEFAULT_LEVEL_SIZE),
             quantity: Decimal::ZERO,
             price,
         }
@@ -147,16 +147,17 @@ impl PriceLevel {
 }
 
 impl Deref for PriceLevel {
-    type Target = VecDeque<OrderId>;
+    type Target = VecDeque<Order>;
 
     fn deref(&self) -> &Self::Target {
-        &self.order_ids
+        //&self.order_ids
+        &self.orders
     }
 }
 
 impl DerefMut for PriceLevel {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.order_ids
+        &mut self.orders
     }
 }
 
@@ -193,7 +194,7 @@ impl PriceLevel {
 
 impl Display for PriceLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} [{:?}]", self.quantity, self.order_ids)
+        write!(f, "{} [{:?}]", self.quantity, self.orders)
     }
 }
 
@@ -242,10 +243,9 @@ macro_rules! match_order {
             let mut total_traded = OrderQuantity::ZERO;
             let mut orders_completed = 0;
 
-            for order_id in price_level.iter_mut() {
-                let maker = $orders
-                    .get_mut(order_id)
-                    .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
+            for maker in price_level.iter_mut() {
+               // let maker = maker_order;
+      
                 let traded = $incoming_order.can_trade(maker);
 
                 let trade = Trade::new(&mut $incoming_order, maker, traded).map_err(OrderbookError::TradeError)?;
@@ -261,7 +261,7 @@ macro_rules! match_order {
 
             price_level.quantity -= total_traded;
             for _ in 0..orders_completed {
-                price_level.pop_front().and_then(|order_id| $orders.remove(& order_id));
+                price_level.pop_front().and_then(|order| $orders.remove(& order.id()));
             }
 
             if price_level.quantity == OrderQuantity::ZERO {

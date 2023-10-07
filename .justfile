@@ -32,4 +32,3 @@ gen:
 # run the simulation
 run:
     cargo run --release --bin generator | RUST_LOG=info cargo run --release
-
